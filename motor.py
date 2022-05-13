@@ -7,9 +7,9 @@ class Motor:
 
     freq = 450.0
     front_max = 1950.0
-    front_min = 1470.0
+    front_min = 1075.0
     rear_max = 1950.0
-    rear_min = 1070.0
+    rear_min = 1075.0
 
     gpio_front = 17
     gpio_rear = 27
@@ -49,10 +49,10 @@ class Motor:
 
     def stop(self):
         self.pwm.ChangeDutyCycle(self.get_duty(0.05))
-        self.start = False
+        #self.start = False
 
     def get_duty(self, v):
-        v = min(2, v)
+        v = min(2.5, v)
         width = self.min + (self.max-self.min)*(v/5)
         return 100*(width/(1000000/__class__.freq))
 
