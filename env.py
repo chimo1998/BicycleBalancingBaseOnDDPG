@@ -251,12 +251,7 @@ ep_list = []
 state_list = []
 action_list = []
 
-print()
-print()
-print()
-print()
-print()
-print("Waiting for connection")
+print("env Waiting for connection")
 
 client = None
 

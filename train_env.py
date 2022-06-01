@@ -1,6 +1,7 @@
 from numpy.core.fromnumeric import nonzero, transpose
 from six import b
 import tensorflow as tf
+from tensorflow import keras
 from tensorflow.keras import layers
 import numpy as np
 import matplotlib.pyplot as plt
@@ -36,6 +37,35 @@ class Buffer:
         self.next_state_buffer[index] = obs_tuple[3]
 
         self.buffer_count += 1
+
+    def save(self):
+        saf = pd.DataFrame({"state": self.state_buffer.tolist(), "action": self.action_buffer.tolist(),
+                                        "reward": self.reward_buffer.tolist(), "next": self.next_state_buffer.tolist()})
+        # saf = pd.DataFrame.from_dict({"angel":columns[0], "angular_velocity":columns[1], "angular_acc":columns[2], "action":action_list})
+        saf.to_csv("buffer.csv",
+                    index=False, encoding="utf-8")
+
+        saf = pd.DataFrame({'size': [self.buffer_count]})
+        saf.to_csv('buffer_size.csv', index=False, encoding='utf-8')
+
+    def load(self):
+        df = pd.read_csv('buffer.csv')
+        sb = df['state'].to_numpy()
+        ssb = [s.replace('[', '').replace(']','').split(', ') for s in sb]
+        self.state_buffer = np.array(ssb, np.float32)
+
+        sb = df['action'].to_numpy()
+        self.action_buffer = np.array([s.replace('[', '').replace(']','').split(', ') for s in sb], np.float32)
+        sb = df['reward'].to_numpy()
+        self.reward_buffer = np.array([s.replace('[', '').replace(']','').split(', ') for s in sb], np.float32)
+
+        sb = df['next'].to_numpy()
+        ssb = [s.replace('[', '').replace(']','').split(', ') for s in sb]
+        self.next_state_buffer = np.array(ssb, np.float32)
+
+        df = pd.read_csv('buffer_size.csv')
+        self.buffer_count = int(df['size'][0])
+        print(self.buffer_count)
 
     @tf.function
     def update(self, state_batch, action_batch, reward_batch, next_state_batch):
@@ -74,6 +104,7 @@ class Buffer:
         # Sample and random
         record_range = min(self.buffer_count, self.buffer_capacity)
         batch_indices = np.random.choice(record_range, self.batch_size)
+        print(type(batch_indices))
 
         state_batch = tf.convert_to_tensor(self.state_buffer[batch_indices])
         action_batch = tf.convert_to_tensor(self.action_buffer[batch_indices])
@@ -83,13 +114,6 @@ class Buffer:
             self.next_state_buffer[batch_indices])
 
         self.update(state_batch, action_batch, reward_batch, next_state_batch)
-
-
-@tf.function
-def update_target(target_weights, weights, tau):
-    for (a, b) in zip(target_weights, weights):
-        a.assign(b * tau + a * (1 - tau))
-
 
 class OUActionNoise:
     def __init__(self, mean, std_deviation, theta=0.05, dt=1e-2, x_iniitial=None):
@@ -120,10 +144,16 @@ class OUActionNoise:
 # Methods
 
 
+@tf.function
+def update_target(target_weights, weights, tau):
+    for (a, b) in zip(target_weights, weights):
+        a.assign(b * tau + a * (1 - tau))
+
+
 def policy(state, noise_object):
     sampled_actions = tf.squeeze(actor_model(state))
     if training:
-        noise = np.clip(noise_object(), -1, 1) * (max(0.0, 1-(max(0,ep-100)/640.0)))
+        noise = np.clip(noise_object(), -1, 1) * (max(0.0, 1-(max(0,ep-100)/800.0)))
         # print("noise %f" % noise)
         sampled_actions = (sampled_actions.numpy() + noise)
         # sampled_actions = (sampled_actions.numpy() + noise + np.random.normal(scale=0.3))
@@ -183,11 +213,12 @@ def get_state(state):
     # state, reward, done, info
     done = False
 
-    reward_stand = (1*(state[0])**2 + 0.1*state[1]**2 + (0.01*state[2]**2))
-    reward_compitition = (((1+state[3]+state[4])) / (1+abs(state[0])))
-    reward = -(alpha*reward_stand + (1-alpha)*reward_compitition)
+    reward_stand = (1*(state[0])**2 + 0.01*state[1]**2 + (0.005*state[2]**2))
+    # reward_compitition = (((1+state[3]+state[4])) / (1+abs(state[0])))
+    # reward = -(alpha*reward_stand + (1-alpha)*reward_compitition)
+    reward = - reward_stand
 
-    if np.abs(state[0]) > 30:
+    if np.abs(state[0]) > 15:
         print("QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ")
         reward = last_reward
         done = True
@@ -229,8 +260,8 @@ target_actor.set_weights(actor_model.get_weights())
 target_critic.set_weights(critic_model.get_weights())
 
 # Learning rate for actor-critic models
-critic_lr = 0.002
-actor_lr = 0.001
+critic_lr = 0.004
+actor_lr = 0.002
 
 critic_optimizer = tf.keras.optimizers.Adam(critic_lr)
 actor_optimizer = tf.keras.optimizers.Adam(actor_lr)
@@ -271,18 +302,37 @@ training = state == STATE_TRAINING
 # model_name = "20220411_r/h5/actor_model-540"
 
 prev_state=None
-reward=None
+reward=0
 done=None
+action=0
+episodic_reward = 0
+base_on = False
+keep = False
 
-def init(actor, critic):
-    global actor_model, critic_model
-    actor_model = tf.keras.models.load_model(actor, compile=False)
-    target_actor = actor_model
-    critic_model = tf.keras.models.load_model(critic, compile=False)
-    target_critic = critic_model
+def init(actor, critic, var_base_on, var_keep):
+    global ep, actor_model, critic_model, base_on, keep
+    base_on = var_base_on
+    keep = var_keep
+    if ( keep ):
+        ep = int(len(os.listdir('./h5'))/2-1)
+        print('./h5/actor_model-%da'%ep)
+        # actor_model = tf.saved_model.load('./h5/actor_model-%d'%ep, tags='None')
+        actor_model = keras.models.load_model('h5/actor_model-%d'%ep, compile=False)
+        target_actor = actor_model
+        # critic_model = tf.saved_model.load('./h5/critic_model-%d'%ep)
+        critic_model = keras.models.load_model('h5/critic_model-%d'%ep, compile=False)
+        target_critic = critic_model
+    elif ( base_on ):
+        actor_model = tf.keras.models.load_model(actor, compile=False)
+        target_actor = actor_model
+        critic_model = tf.keras.models.load_model(critic, compile=False)
+        target_critic = critic_model
 
-    global buffer, ep_reward_list, avg_reward_list, time_list, ep_list, state_list, action_list
+    global buffer, ep_reward_list, avg_reward_list, time_list, ep_list, state_list, action_list, episodic_reward
+    episodic_reward = 0
     buffer = Buffer(80000, 64)
+    if (keep or base_on):
+        buffer.load()
     ep_reward_list = []
     avg_reward_list = []
     time_list = []
@@ -294,21 +344,32 @@ def init(actor, critic):
     global tt
     tt = time.time()
 
+def episode_start():
+    global ep_reward_list, state_list, action_list, episodic_reward
+    episodic_reward = 0
+    action_list = []
+    global prev_state, reward, done
+    prev_state, reward, done = get_state((0,0,0,0,0))
+    state_list = []
+    global tt, ep
+    tt = time.time()
+    ep+=1
+
+
 ep = 0
 
 prev_reward = 0
 prev_action = 0
 prev_done = False
 tt = time.time()
-
 def predict(input_state):
     global prev_state, done, alpha, ep, tt
     global reward, action
-    global buffer, ep_reward_list, avg_reward_list, time_list, ep_list, state_list, action_list
+    global buffer, ep_reward_list, avg_reward_list, time_list, ep_list, state_list, action_list, episodic_reward
 
     alpha = alpha_max+(alpha_min-alpha_max)*float(min(1.0, (ep/300.0)))
 
-    buffer.record((prev_state, action, reward, state))
+    buffer.record((prev_state, action, reward, input_state))
     buffer.learn()
     update_target(target_actor.variables, actor_model.variables, tau)
     update_target(target_critic.variables, critic_model.variables, tau)
@@ -317,32 +378,8 @@ def predict(input_state):
     state, reward, done = get_state(input_state)
     episodic_reward += reward
 
-
-    buffer.record()
-
     if done:
         return None
-        ep_reward_list.append(episodic_reward)
-        ep_list.append(ep)
-        time_list.append(time.time()-tt)
-        avg_reward = np.mean(ep_reward_list[-40:])
-        print("Episode * {} * Avg Reward is ==> {}".format(ep, avg_reward))
-        avg_reward_list.append(avg_reward)
-        actor_model.save("h5/actor_model-{0}".format(ep))
-        critic_model.save("h5/critic_model-{0}".format(ep))
-        df = pd.DataFrame.from_dict(
-            {"ep": ep_list, "ep_reward": ep_reward_list, "time": time_list})
-        df.to_csv("history/his-{0}.csv".format(ep),
-                    index=False, encoding='utf-8')
-
-        columns = list(zip(*state_list))
-        saf = pd.DataFrame.from_dict({"angel": columns[0], "angular_velocity": columns[1],
-                                        "angular_acc": columns[2], "motor1": columns[3], "motor2": columns[4], "action": action_list})
-        # saf = pd.DataFrame.from_dict({"angel":columns[0], "angular_velocity":columns[1], "angular_acc":columns[2], "action":action_list})
-        saf.to_csv("states/sa-{0}.csv".format(ep),
-                    index=False, encoding="utf-8")
-        state_list = []
-        action_list = []
 
     tf_state = tf.expand_dims(tf.convert_to_tensor(state), 0)
 
@@ -352,170 +389,42 @@ def predict(input_state):
     prev_state = state
     return action[0]
 
-# if state == STATE_TRAINING:
-#     for ep in range(total_episodes):
-#         (client, address) = server.accept()
-#         print("Connected, connect to ", address)
-#         print("Start to train")
-#         # Init
-#         prev_state, reward, done = get_state()
-#         episodic_reward = 0
-#         tt = 0
+def save():
+    global state_list, ep_list, time_list, avg_reward, ep_reward_list, avg_reward_list, action_list, state_list
+    if len(state_list) == 0:
+        return
+    ep_reward_list.append(episodic_reward)
+    ep_list.append(ep)
+    time_list.append(time.time()-tt)
+    avg_reward = np.mean(ep_reward_list[-40:])
+    print("Episode * {} * Avg Reward is ==> {}".format(ep, avg_reward))
+    avg_reward_list.append(avg_reward)
+    actor_model.save("h5/actor_model-%d"%ep)
+    critic_model.save("h5/critic_model-%d"%ep)
+    try:
+        df = pd.DataFrame.from_dict(
+            {"ep": ep_list, "ep_reward": ep_reward_list, "time": time_list})
+    except:
+        return
+    df.to_csv("history/his-%d.csv"%(ep),
+                index=False, encoding='utf-8')
 
-#         while True:
-#             alpha = alpha_max+(alpha_min-alpha_max)*float(min(1.0, (ep/860.0)))
-#             tt += 1
-#             # print("state", prev_state)
-#             tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
+    action_list.append(999)
+    if(len(state_list) != len(action_list)):
+        state_list.append(state_list[-1])
 
-#             action = policy(tf_prev_state, ou_noise)
-#             print("action", action[0])
-#             # Do action
-#             send_act(action[0])
-
-#             state, reward, done = get_state()
-#             #print(state)
-
-#             buffer.record((prev_state, action, reward, state))
-#             episodic_reward += reward
-
-#             buffer.learn()
-#             update_target(target_actor.variables, actor_model.variables, tau)
-#             update_target(target_critic.variables, critic_model.variables, tau)
-
-#             if done:
-#                 print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-#                 send_act(200)
-#                 break
-
-#             prev_state = state
-#             time.sleep(sleep_time)
-#             if(tt/fps > episode_time):
-#                 send_act(200)
-#                 break
-
-#         ep_reward_list.append(episodic_reward)
-#         ep_list.append(ep)
-#         time_list.append(tt/40)
-
-#         avg_reward = np.mean(ep_reward_list[-40:])
-#         print("Episode * {} * Avg Reward is ==> {}".format(ep, avg_reward))
-#         avg_reward_list.append(avg_reward)
-#         client.close()
-
-#         action_list.append(999)
-
-#         if ep % 20 == 0:  # and ep != 0:
-#             actor_model.save("h5/actor_model-{0}".format(ep))
-#             critic_model.save("h5/critic_model-{0}".format(ep))
-#             df = pd.DataFrame.from_dict(
-#                 {"ep": ep_list, "ep_reward": ep_reward_list, "time": time_list})
-#             df.to_csv("history/his-{0}.csv".format(ep),
-#                       index=False, encoding='utf-8')
-
-#             columns = list(zip(*state_list))
-#             saf = pd.DataFrame.from_dict({"angel": columns[0], "angular_velocity": columns[1],
-#                                          "angular_acc": columns[2], "motor1": columns[3], "motor2": columns[4], "action": action_list})
-#             # saf = pd.DataFrame.from_dict({"angel":columns[0], "angular_velocity":columns[1], "angular_acc":columns[2], "action":action_list})
-#             saf.to_csv("states/sa-{0}.csv".format(ep),
-#                        index=False, encoding="utf-8")
-#             state_list = []
-#             action_list = []
-
-# elif state == STATE_RUNNING:
-#     actor_model = tf.keras.models.load_model(model_name)
-#     # actor_model.load_weights(weights)
-#     while True:
-#         (client, address) = server.accept()
-#         print("Connected, connect to ", address)
-#         print("Start to train")
-#         # Init
-#         prev_state, reward, done = get_state()
-#         episodic_reward = 0
-
-#         while True:
-#             # print("state", prev_state)
-#             tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
-
-#             action = policy(tf_prev_state, ou_noise)
-#             print("action", action[0])
-#             # Do action
-#             send_act(action[0])
-
-#             state, reward, done = get_state()
-
-#             if done:
-#                 print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-#                 send_act(200)
-#                 break
-
-#             prev_state = state
-#             time.sleep(sleep_time)
-
-#         client.close()
-
-# elif state == STATE_TESTING:
-#     actor_model = tf.keras.models.load_model(model_name)
-#     for ep in range(1, testing_episodes):
-#         (client, address) = server.accept()
-#         print("Connected, connect to ", address)
-#         print("Start to train")
-#         # Init
-#         prev_state, reward, done = get_state()
-#         episodic_reward = 0
-#         tt = 0
-
-#         while True:
-#             tt += 1
-#             # print("state", prev_state)
-#             tf_prev_state = tf.expand_dims(tf.convert_to_tensor(prev_state), 0)
-
-#             action = policy(tf_prev_state, ou_noise)
-#             print("action", action[0])
-#             # Do action
-#             send_act(action[0])
-
-#             state, reward, done = get_state()
-
-#             buffer.record((prev_state, action, reward, state))
-#             episodic_reward += reward
-
-#             # buffer.learn()
-#             # update_target(target_actor.variables, actor_model.variables, tau)
-#             # update_target(target_critic.variables, critic_model.variables, tau)
-
-#             if done:
-#                 print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-#                 send_act(200)
-#                 break
-
-#             prev_state = state
-#             time.sleep(sleep_time)
-#             if(tt/fps > 30):
-#                 send_act(200)
-#                 break
-
-#         ep_reward_list.append(episodic_reward)
-#         ep_list.append(ep)
-#         time_list.append(tt/fps)
-
-#         avg_reward = np.mean(ep_reward_list[-40:])
-#         print("Episode * {} * Avg Reward is ==> {}".format(ep, avg_reward))
-#         avg_reward_list.append(avg_reward)
-#         client.close()
-
-#         action_list.append(999)
-
-#         if ep % 20 == 0:  # and ep != 0:
-#             df = pd.DataFrame.from_dict(
-#                 {"ep": ep_list, "ep_reward": ep_reward_list, "time": time_list})
-#             df.to_csv("test/his-{0}.csv".format(ep),
-#                       index=False, encoding='utf-8')
-
-#             columns = list(zip(*state_list))
-#             saf = pd.DataFrame.from_dict({"angel": columns[0], "angular_velocity": columns[1],
-#                                          "angular_acc": columns[2], "motor1": columns[3], "motor2": columns[4], "action": action_list})
-#             saf.to_csv("test/sa-{0}.csv".format(ep),
-#                        index=False, encoding="utf-8")
-#             state_list = []
-#             action_list = []
+    columns = list(zip(*state_list))
+    try:
+        saf = pd.DataFrame.from_dict({"angel": columns[0], "angular_velocity": columns[1],
+                                        "angular_acc": columns[2], "motor1": columns[3], "motor2": columns[4], "action": action_list})
+        # saf = pd.DataFrame.from_dict({"angel":columns[0], "angular_velocity":columns[1], "angular_acc":columns[2], "action":action_list})
+        saf.to_csv("states/sa-%d.csv"%(ep),
+                    index=False, encoding="utf-8")
+    except Exception as e:
+        print(len(action_list))
+        print(len(columns[0]))
+        print(e)
+        return
+    buffer.save()
+    state_list = []
+    action_list = []
