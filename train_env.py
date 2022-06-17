@@ -12,7 +12,7 @@ import pandas as pd
 
 import time
 
-from tensorflow.python.keras.backend import batch_flatten
+from tensorflow.python.keras import backend
 from tensorflow.keras.utils import plot_model
 
 # Classes
@@ -104,7 +104,7 @@ class Buffer:
         # Sample and random
         record_range = min(self.buffer_count, self.buffer_capacity)
         batch_indices = np.random.choice(record_range, self.batch_size)
-        print(type(batch_indices))
+        # print(type(batch_indices))
 
         state_batch = tf.convert_to_tensor(self.state_buffer[batch_indices])
         action_batch = tf.convert_to_tensor(self.action_buffer[batch_indices])
@@ -153,7 +153,7 @@ def update_target(target_weights, weights, tau):
 def policy(state, noise_object):
     sampled_actions = tf.squeeze(actor_model(state))
     if training:
-        noise = np.clip(noise_object(), -1, 1) * (max(0.0, 1-(max(0,ep-100)/800.0)))
+        noise = np.clip( (noise_object() * (max(0.0, 1-(max(0,ep-100)/800.0)))), -1, 1) 
         # print("noise %f" % noise)
         sampled_actions = (sampled_actions.numpy() + noise)
         # sampled_actions = (sampled_actions.numpy() + noise + np.random.normal(scale=0.3))
@@ -162,12 +162,14 @@ def policy(state, noise_object):
     legal_action = np.clip(sampled_actions, LOWER_BOUND, UPPER_BOUND)
     action_list.append(legal_action)
 
-    return [np.squeeze(legal_action)]
+    return np.squeeze(legal_action)
 
 
 actoooooor = True
 criticcccc = True
 
+def my_activation(x):
+    return backend.switch(x <= 0, x*0, tf.math.tanh(x) * UPPER_BOUND)
 
 def get_actor():
     last_init = tf.random_uniform_initializer(minval=-0.03, maxval=0.03)
@@ -177,10 +179,10 @@ def get_actor():
     out = layers.Dense(256, activation="relu")(out)
     out = layers.Dense(128, activation="relu")(out)
     out = layers.Dense(64, activation="relu")(out)
-    outputs = layers.Dense(1, activation="tanh",
+    outputs = layers.Dense(NUM_ACTIONS, activation=my_activation,
                            kernel_initializer=last_init)(out)
 
-    outputs = outputs * UPPER_BOUND
+    #outputs = outputs * UPPER_BOUND
     model = tf.keras.Model(inputs, outputs)
     return model
 
@@ -213,12 +215,14 @@ def get_state(state):
     # state, reward, done, info
     done = False
 
-    reward_stand = (1*(state[0])**2 + 0.01*state[1]**2 + (0.005*state[2]**2))
+    reward_stand = (1*(state[0])**2 + 0.1*state[1]**2 + (0.01*state[2]**2))
     # reward_compitition = (((1+state[3]+state[4])) / (1+abs(state[0])))
     # reward = -(alpha*reward_stand + (1-alpha)*reward_compitition)
-    reward = - reward_stand
+    multi_motor = (4/(1+(state[3]+state[4]))) * (abs(state[0])/5)
+    reward = - reward_stand *  multi_motor
 
     if np.abs(state[0]) > 15:
+        print(state[0])
         print("QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ")
         reward = last_reward
         done = True
@@ -232,13 +236,13 @@ def get_state(state):
 
 
 NUM_STATES = 5
-NUM_ACTIONS = 1
+NUM_ACTIONS = 2
 
 fps = 40
 sleep_time = (float)(1/fps)
 
-UPPER_BOUND = 5.0
-LOWER_BOUND = -5.0
+UPPER_BOUND = 3
+LOWER_BOUND = 0
 
 last_reward = 0
 alpha = 1.0
@@ -247,7 +251,7 @@ alpha_min = 0.5
 
 std_dev = 0.3
 ou_noise = OUActionNoise(mean=np.zeros(
-    1), std_deviation=float(std_dev) * np.ones(1))
+    NUM_ACTIONS), std_deviation=float(std_dev) * np.ones(NUM_ACTIONS))
 
 actor_model = get_actor()
 critic_model = get_critic()
@@ -269,9 +273,9 @@ actor_optimizer = tf.keras.optimizers.Adam(actor_lr)
 total_episodes = 1500
 episode_time = 30
 # Discount factor for future rewards
-gamma = 0.99
+gamma = 0.985
 # Used to update target networks
-tau = 0.005
+tau = 0.007
 
 buffer = Buffer(80000, 64)
 
@@ -289,8 +293,6 @@ print()
 print()
 print("Waiting for connection")
 
-client = None
-
 STATE_TRAINING = 1
 STATE_RUNNING = 2
 STATE_TESTING = 3
@@ -304,7 +306,7 @@ training = state == STATE_TRAINING
 prev_state=None
 reward=0
 done=None
-action=0
+action=[0,0]
 episodic_reward = 0
 base_on = False
 keep = False
@@ -314,7 +316,7 @@ def init(actor, critic, var_base_on, var_keep):
     base_on = var_base_on
     keep = var_keep
     if ( keep ):
-        ep = int(len(os.listdir('./h5'))/2-1)
+        ep = int(len(os.listdir('./h5'))/2)-4
         print('./h5/actor_model-%da'%ep)
         # actor_model = tf.saved_model.load('./h5/actor_model-%d'%ep, tags='None')
         actor_model = keras.models.load_model('h5/actor_model-%d'%ep, compile=False)
@@ -379,7 +381,7 @@ def predict(input_state):
     episodic_reward += reward
 
     if done:
-        return None
+        return []
 
     tf_state = tf.expand_dims(tf.convert_to_tensor(state), 0)
 
@@ -387,7 +389,7 @@ def predict(input_state):
 
 
     prev_state = state
-    return action[0]
+    return action
 
 def save():
     global state_list, ep_list, time_list, avg_reward, ep_reward_list, avg_reward_list, action_list, state_list
@@ -421,7 +423,7 @@ def save():
         saf.to_csv("states/sa-%d.csv"%(ep),
                     index=False, encoding="utf-8")
     except Exception as e:
-        print(len(action_list))
+        # print(len(action_list))
         print(len(columns[0]))
         print(e)
         return
