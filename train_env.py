@@ -152,8 +152,9 @@ def update_target(target_weights, weights, tau):
 
 def policy(state, noise_object):
     sampled_actions = tf.squeeze(actor_model(state))
+    print('sampled=', sampled_actions)
     if training:
-        noise = np.clip( (noise_object() * (max(0.0, 1-(max(0,ep-100)/800.0)))), -1, 1) 
+        noise = np.clip( (noise_object()), -1, 1)  * (max(0.0, 1-(max(0,ep-100)/800.0)))
         # print("noise %f" % noise)
         sampled_actions = (sampled_actions.numpy() + noise)
         # sampled_actions = (sampled_actions.numpy() + noise + np.random.normal(scale=0.3))
@@ -169,7 +170,7 @@ actoooooor = True
 criticcccc = True
 
 def my_activation(x):
-    return backend.switch(x <= 0, x*0, tf.math.tanh(x) * UPPER_BOUND)
+    return backend.switch(x <= 0, x*0, tf.math.tanh(x))
 
 def get_actor():
     last_init = tf.random_uniform_initializer(minval=-0.03, maxval=0.03)
@@ -179,10 +180,10 @@ def get_actor():
     out = layers.Dense(256, activation="relu")(out)
     out = layers.Dense(128, activation="relu")(out)
     out = layers.Dense(64, activation="relu")(out)
-    outputs = layers.Dense(NUM_ACTIONS, activation=my_activation,
+    outputs = layers.Dense(NUM_ACTIONS, activation=my_activation, #'sigmoid',
                            kernel_initializer=last_init)(out)
 
-    #outputs = outputs * UPPER_BOUND
+    outputs = outputs * UPPER_BOUND
     model = tf.keras.Model(inputs, outputs)
     return model
 
@@ -264,8 +265,8 @@ target_actor.set_weights(actor_model.get_weights())
 target_critic.set_weights(critic_model.get_weights())
 
 # Learning rate for actor-critic models
-critic_lr = 0.004
-actor_lr = 0.002
+critic_lr = 0.002
+actor_lr = 0.001
 
 critic_optimizer = tf.keras.optimizers.Adam(critic_lr)
 actor_optimizer = tf.keras.optimizers.Adam(actor_lr)
@@ -273,9 +274,9 @@ actor_optimizer = tf.keras.optimizers.Adam(actor_lr)
 total_episodes = 1500
 episode_time = 30
 # Discount factor for future rewards
-gamma = 0.985
+gamma = 0.99
 # Used to update target networks
-tau = 0.007
+tau = 0.005
 
 buffer = Buffer(80000, 64)
 
