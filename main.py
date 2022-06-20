@@ -151,7 +151,7 @@ while True:
         continue
 
     a = predict((x, dx, ddx, motor_speed_front, motor_speed_rear))
-    if(len(a)==0):
+    if(a==200):#len(a)==0):
         print('stop')
         GPIO.output(stop_led, GPIO.HIGH)
         for stopt in range(2):
@@ -166,6 +166,26 @@ while True:
     GPIO.output(led, GPIO.LOW)
     #a/=1.8
     print(x, dx, ddx, motor_speed_front, motor_speed_rear, dt, a)
+
+    if (a>0):
+        if (a <= motor_speed_front*0.3):
+            motor_speed_front *= 0.3
+        else:
+            motor_speed_front = a
+        front.set_speed(motor_speed_front)
+        motor_speed_rear = rear.stop()
+    else:
+        a = -a
+        if (a <= motor_speed_rear*0.3):
+            motor_speed_rear*=0.3
+        else:
+            motor_speed_rear = a
+        rear.set_speed(motor_speed_rear)
+        motor_speed_front = front.stop()
+    continue
+
+
+
     if(a[0] <= motor_speed_front*0.3):
         motor_speed_front = motor_speed_front*0.3
     else:

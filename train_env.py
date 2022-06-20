@@ -161,6 +161,7 @@ def policy(state, noise_object):
         # print(sampled_actions)
 
     legal_action = np.clip(sampled_actions, LOWER_BOUND, UPPER_BOUND)
+    print(legal_action)
     action_list.append(legal_action)
 
     return np.squeeze(legal_action)
@@ -176,11 +177,11 @@ def get_actor():
     last_init = tf.random_uniform_initializer(minval=-0.03, maxval=0.03)
 
     inputs = layers.Input(shape=(NUM_STATES,))
-    out = layers.Dense(128, activation="relu")(inputs)
+    out = layers.Dense(256, activation="relu")(inputs)
     out = layers.Dense(256, activation="relu")(out)
-    out = layers.Dense(128, activation="relu")(out)
+    #out = layers.Dense(128, activation="relu")(out)
     out = layers.Dense(64, activation="relu")(out)
-    outputs = layers.Dense(NUM_ACTIONS, activation=my_activation, #'sigmoid',
+    outputs = layers.Dense(NUM_ACTIONS, activation='tanh',
                            kernel_initializer=last_init)(out)
 
     outputs = outputs * UPPER_BOUND
@@ -194,12 +195,12 @@ def get_critic():
     state_out = layers.Dense(96, activation="relu")(state_out)
 
     action_inputs = layers.Input(shape=(NUM_ACTIONS))
-    action_out = layers.Dense(64, activation="relu")(action_inputs)
+    action_out = layers.Dense(32, activation="relu")(action_inputs)
 
     concat = layers.Concatenate()([state_out, action_out])
 
-    out = layers.Dense(256, activation="relu")(concat)
-    out = layers.Dense(128, activation="relu")(out)
+    out = layers.Dense(128, activation="relu")(concat)
+    out = layers.Dense(256, activation="relu")(out)
     out = layers.Dense(64, activation="softmax")(out)
     outputs = layers.Dense(1)(out)
 
@@ -217,10 +218,10 @@ def get_state(state):
     done = False
 
     reward_stand = (1*(state[0])**2 + 0.1*state[1]**2 + (0.01*state[2]**2))
-    # reward_compitition = (((1+state[3]+state[4])) / (1+abs(state[0])))
-    # reward = -(alpha*reward_stand + (1-alpha)*reward_compitition)
-    multi_motor = (4/(1+(state[3]+state[4]))) * (abs(state[0])/5)
-    reward = - reward_stand *  multi_motor
+    reward_compitition = (((1+state[3]+state[4])) / (1+abs(state[0])))
+    reward = -(alpha*reward_stand + (1-alpha)*reward_compitition)
+    # multi_motor = (4/(1+(state[3]+state[4]))) * (abs(state[0])/5)
+    # reward = - reward_stand *  multi_motor
 
     if np.abs(state[0]) > 15:
         print(state[0])
@@ -237,13 +238,13 @@ def get_state(state):
 
 
 NUM_STATES = 5
-NUM_ACTIONS = 2
+NUM_ACTIONS = 1
 
 fps = 40
 sleep_time = (float)(1/fps)
 
 UPPER_BOUND = 3
-LOWER_BOUND = 0
+LOWER_BOUND = -3
 
 last_reward = 0
 alpha = 1.0
@@ -307,7 +308,7 @@ training = state == STATE_TRAINING
 prev_state=None
 reward=0
 done=None
-action=[0,0]
+action=0
 episodic_reward = 0
 base_on = False
 keep = False
@@ -370,7 +371,7 @@ def predict(input_state):
     global reward, action
     global buffer, ep_reward_list, avg_reward_list, time_list, ep_list, state_list, action_list, episodic_reward
 
-    alpha = alpha_max+(alpha_min-alpha_max)*float(min(1.0, (ep/300.0)))
+    alpha = alpha_max+(alpha_min-alpha_max)*float(min(1.0, (ep/100.0)))
 
     buffer.record((prev_state, action, reward, input_state))
     buffer.learn()
@@ -382,7 +383,7 @@ def predict(input_state):
     episodic_reward += reward
 
     if done:
-        return []
+        return 200
 
     tf_state = tf.expand_dims(tf.convert_to_tensor(state), 0)
 
