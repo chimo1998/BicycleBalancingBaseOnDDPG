@@ -52,20 +52,25 @@ class Buffer:
         df = pd.read_csv('buffer.csv')
         sb = df['state'].to_numpy()
         ssb = [s.replace('[', '').replace(']','').split(', ') for s in sb]
-        self.state_buffer = np.array(ssb, np.float32)
+        state_buffer = np.array(ssb, np.float32)
 
         sb = df['action'].to_numpy()
-        self.action_buffer = np.array([s.replace('[', '').replace(']','').split(', ') for s in sb], np.float32)
+        action_buffer = np.array([s.replace('[', '').replace(']','').split(', ') for s in sb], np.float32)
         sb = df['reward'].to_numpy()
-        self.reward_buffer = np.array([s.replace('[', '').replace(']','').split(', ') for s in sb], np.float32)
+        reward_buffer = np.array([s.replace('[', '').replace(']','').split(', ') for s in sb], np.float32)
 
         sb = df['next'].to_numpy()
         ssb = [s.replace('[', '').replace(']','').split(', ') for s in sb]
-        self.next_state_buffer = np.array(ssb, np.float32)
+        next_state_buffer = np.array(ssb, np.float32)
 
         df = pd.read_csv('buffer_size.csv')
         self.buffer_count = int(df['size'][0])
-        print(self.buffer_count)
+
+        for i in range(self.buffer_count):
+            self.state_buffer[i] = state_buffer[i]
+            self.action_buffer[i] = action_buffer[i]
+            self.reward_buffer[i] = reward_buffer[i]
+            self.next_state_buffer[i] = next_state_buffer[i]
 
     @tf.function
     def update(self, state_batch, action_batch, reward_batch, next_state_batch):
@@ -174,12 +179,12 @@ def my_activation(x):
     return backend.switch(x <= 0, x*0, tf.math.tanh(x))
 
 def get_actor():
-    last_init = tf.random_uniform_initializer(minval=-0.03, maxval=0.03)
+    last_init = tf.random_uniform_initializer(minval=-0.003, maxval=0.003)
 
     inputs = layers.Input(shape=(NUM_STATES,))
-    out = layers.Dense(256, activation="relu")(inputs)
+    out = layers.Dense(128, activation="relu")(inputs)
     out = layers.Dense(256, activation="relu")(out)
-    #out = layers.Dense(128, activation="relu")(out)
+    out = layers.Dense(128, activation="relu")(out)
     out = layers.Dense(64, activation="relu")(out)
     outputs = layers.Dense(NUM_ACTIONS, activation='tanh',
                            kernel_initializer=last_init)(out)
@@ -191,17 +196,17 @@ def get_actor():
 
 def get_critic():
     state_input = layers.Input(shape=(NUM_STATES))
-    state_out = layers.Dense(64, activation="relu")(state_input)
-    state_out = layers.Dense(96, activation="relu")(state_out)
+    state_out = layers.Dense(64, activation="relu")(state_input) # 64
+    state_out = layers.Dense(96, activation="relu")(state_out) # 96
 
     action_inputs = layers.Input(shape=(NUM_ACTIONS))
-    action_out = layers.Dense(32, activation="relu")(action_inputs)
+    action_out = layers.Dense(64, activation="relu")(action_inputs) # 64
 
     concat = layers.Concatenate()([state_out, action_out])
 
-    out = layers.Dense(128, activation="relu")(concat)
-    out = layers.Dense(256, activation="relu")(out)
-    out = layers.Dense(64, activation="softmax")(out)
+    out = layers.Dense(256, activation="relu")(concat) # 256
+    out = layers.Dense(128, activation="relu")(out) # 128
+    out = layers.Dense(64, activation="relu")(out) # 64
     outputs = layers.Dense(1)(out)
 
     model = tf.keras.Model([state_input, action_inputs], outputs)
@@ -218,12 +223,12 @@ def get_state(state):
     done = False
 
     reward_stand = (1*(state[0])**2 + 0.1*state[1]**2 + (0.01*state[2]**2))
-    reward_compitition = (((1+state[3]+state[4])) / (1+abs(state[0])))
+    reward_compitition = (((1+state[3])+(state[4])) / (1 + abs(state[0])))
     reward = -(alpha*reward_stand + (1-alpha)*reward_compitition)
     # multi_motor = (4/(1+(state[3]+state[4]))) * (abs(state[0])/5)
     # reward = - reward_stand *  multi_motor
 
-    if np.abs(state[0]) > 15:
+    if np.abs(state[0]) > 10:
         print(state[0])
         print("QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ")
         reward = last_reward
@@ -251,7 +256,7 @@ alpha = 1.0
 alpha_max = 0.8
 alpha_min = 0.5
 
-std_dev = 0.3
+std_dev = 0.5
 ou_noise = OUActionNoise(mean=np.zeros(
     NUM_ACTIONS), std_deviation=float(std_dev) * np.ones(NUM_ACTIONS))
 
@@ -312,13 +317,16 @@ action=0
 episodic_reward = 0
 base_on = False
 keep = False
+run = False
 
-def init(actor, critic, var_base_on, var_keep):
+def init(actor, critic, var_base_on, var_keep, var_run):
     global ep, actor_model, critic_model, base_on, keep
     base_on = var_base_on
     keep = var_keep
+    var_run = var_run
     if ( keep ):
         ep = int(len(os.listdir('./h5'))/2)-4
+        ep = 295
         print('./h5/actor_model-%da'%ep)
         # actor_model = tf.saved_model.load('./h5/actor_model-%d'%ep, tags='None')
         actor_model = keras.models.load_model('h5/actor_model-%d'%ep, compile=False)
@@ -331,6 +339,10 @@ def init(actor, critic, var_base_on, var_keep):
         target_actor = actor_model
         critic_model = tf.keras.models.load_model(critic, compile=False)
         target_critic = critic_model
+    elif (var_run):
+        actor_model = tf.keras.models.load_model(actor, compile=False)
+        critic_model = tf.keras.models.load_model(critic, compile=False)
+
 
     global buffer, ep_reward_list, avg_reward_list, time_list, ep_list, state_list, action_list, episodic_reward
     episodic_reward = 0
@@ -355,9 +367,10 @@ def episode_start():
     global prev_state, reward, done
     prev_state, reward, done = get_state((0,0,0,0,0))
     state_list = []
-    global tt, ep
+    global tt, ep, alpha
     tt = time.time()
     ep+=1
+    alpha = alpha_max+(alpha_min-alpha_max)*float(min(1.0, (ep/600.0)))
 
 
 ep = 0
@@ -371,7 +384,6 @@ def predict(input_state):
     global reward, action
     global buffer, ep_reward_list, avg_reward_list, time_list, ep_list, state_list, action_list, episodic_reward
 
-    alpha = alpha_max+(alpha_min-alpha_max)*float(min(1.0, (ep/100.0)))
 
     buffer.record((prev_state, action, reward, input_state))
     buffer.learn()
@@ -392,6 +404,25 @@ def predict(input_state):
 
     prev_state = state
     return action
+
+def run_predict(input_state):
+    global prev_state, done, alpha, ep, tt
+    global reward, action, episodic_reward
+
+    state, reward, done = get_state(input_state)
+    episodic_reward += reward
+
+    if done:
+        return 200
+
+    tf_state = tf.expand_dims(tf.convert_to_tensor(state), 0)
+
+    action = policy(tf_state, ou_noise)
+
+
+    prev_state = state
+    return action
+
 
 def save():
     global state_list, ep_list, time_list, avg_reward, ep_reward_list, avg_reward_list, action_list, state_list

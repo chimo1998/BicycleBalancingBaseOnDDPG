@@ -206,8 +206,8 @@ NUM_ACTIONS = 1
 fps = 40
 sleep_time = (float)(1/fps)
 
-UPPER_BOUND = 5.0
-LOWER_BOUND = -5.0
+UPPER_BOUND = 3.0
+LOWER_BOUND = -3.0
 
 last_reward = 0
 alpha = 1.0

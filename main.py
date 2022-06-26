@@ -56,11 +56,13 @@ motor_speed_rear = 0
 t = time.time()
 o = 3
 
-actor_model = "actor_model-480"
-critic_model = "critic_model-480"
-training = True
-base_on = False
-keep = False
+actor_model = "actor_model-180"
+critic_model = "critic_model-180"
+purpose = 2
+training = purpose != 3
+base_on = purpose == 1
+keep = purpose == 2
+start_run = purpose == 3
 predict = env.predict
 
 print("="*30)
@@ -70,11 +72,11 @@ print('Base on: ', base_on)
 print('Keep: ', keep)
 print('='*30)
 if training:
-    train_env.init(actor_model, critic_model, base_on, keep)
+    train_env.init(actor_model, critic_model, base_on, keep, start_run)
     predict = train_env.predict
-else:
-    env.init(actor_model)
-    predict = env.predict
+elif start_run:
+    train_env.init(actor_model, critic_model, base_on, keep, start_run)
+    predict = train_env.run_predict
 
 print('='*30)
 print('Initial done')
@@ -134,14 +136,14 @@ while True:
     y = kalman.predict()
     x = x[0][0]
     # x = gx
-    if(dt < 0.1):
+    if(dt < 0.08):
         continue
     # x = gx
     # print(dt)
 
 
     dx = (x-last_x) / dt
-    ddx = (dx - last_dx) / dt
+    ddx = (dx - last_dx) #/ dt
     last_x = x
     last_dx = dx
     t = time.time()
@@ -167,7 +169,8 @@ while True:
     #a/=1.8
     print(x, dx, ddx, motor_speed_front, motor_speed_rear, dt, a)
 
-    if (a>0):
+    if (a<0):
+        a = -a
         if (a <= motor_speed_front*0.3):
             motor_speed_front *= 0.3
         else:
@@ -175,7 +178,6 @@ while True:
         front.set_speed(motor_speed_front)
         motor_speed_rear = rear.stop()
     else:
-        a = -a
         if (a <= motor_speed_rear*0.3):
             motor_speed_rear*=0.3
         else:
@@ -201,3 +203,4 @@ while True:
     if motor_speed_rear<0:
         motor_speed_rear=0
     rear.set_speed(motor_speed_rear)
+    t = time.time()
