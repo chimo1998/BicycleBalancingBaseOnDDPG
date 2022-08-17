@@ -74,6 +74,7 @@ class Buffer:
 
     @tf.function
     def update(self, state_batch, action_batch, reward_batch, next_state_batch):
+        print('in update')
         with tf.GradientTape() as tape:
             # Use target actor_model predict target actions
             target_actions = target_actor(next_state_batch, training=True)
@@ -104,11 +105,15 @@ class Buffer:
         actor_optimizer.apply_gradients(
             zip(actor_grad, actor_model.trainable_variables)
         )
+        print('update done')
 
     def learn(self):
         # Sample and random
-        record_range = min(self.buffer_count, self.buffer_capacity)
+        max_range = self.buffer_capacity
+        record_range = min(self.buffer_count, max_range)
         batch_indices = np.random.choice(record_range, self.batch_size)
+        if (self.buffer_count>max_range):
+            batch_indices += (self.buffer_count - max_range)
         # print(type(batch_indices))
 
         state_batch = tf.convert_to_tensor(self.state_buffer[batch_indices])
@@ -159,7 +164,7 @@ def policy(state, noise_object):
     sampled_actions = tf.squeeze(actor_model(state))
     print('sampled=', sampled_actions)
     if training:
-        noise = np.clip( (noise_object()), -1, 1)  * (max(0.0, 1-(max(0,ep-100)/800.0)))
+        noise = np.clip( (noise_object()), NOISE_LOWER_BOUND, NOISE_UPPER_BOUND)  * (max(0.0, 1-(max(0,ep-100)/850.0)))
         # print("noise %f" % noise)
         sampled_actions = (sampled_actions.numpy() + noise)
         # sampled_actions = (sampled_actions.numpy() + noise + np.random.normal(scale=0.3))
@@ -182,10 +187,10 @@ def get_actor():
     last_init = tf.random_uniform_initializer(minval=-0.003, maxval=0.003)
 
     inputs = layers.Input(shape=(NUM_STATES,))
-    out = layers.Dense(128, activation="relu")(inputs)
-    out = layers.Dense(256, activation="relu")(out)
-    out = layers.Dense(128, activation="relu")(out)
-    out = layers.Dense(64, activation="relu")(out)
+    out = layers.Dense(128, activation="elu")(inputs)
+    out = layers.Dense(256, activation="elu")(out)
+    out = layers.Dense(128, activation="elu")(out)
+    out = layers.Dense(64, activation="elu")(out)
     outputs = layers.Dense(NUM_ACTIONS, activation='tanh',
                            kernel_initializer=last_init)(out)
 
@@ -196,17 +201,17 @@ def get_actor():
 
 def get_critic():
     state_input = layers.Input(shape=(NUM_STATES))
-    state_out = layers.Dense(64, activation="relu")(state_input) # 64
-    state_out = layers.Dense(96, activation="relu")(state_out) # 96
+    state_out = layers.Dense(64, activation="elu")(state_input) # 64
+    state_out = layers.Dense(96, activation="elu")(state_out) # 96
 
     action_inputs = layers.Input(shape=(NUM_ACTIONS))
-    action_out = layers.Dense(64, activation="relu")(action_inputs) # 64
+    action_out = layers.Dense(64, activation="elu")(action_inputs) # 64
 
     concat = layers.Concatenate()([state_out, action_out])
 
-    out = layers.Dense(256, activation="relu")(concat) # 256
-    out = layers.Dense(128, activation="relu")(out) # 128
-    out = layers.Dense(64, activation="relu")(out) # 64
+    out = layers.Dense(256, activation="elu")(concat) # 256
+    out = layers.Dense(128, activation="elu")(out) # 128
+    out = layers.Dense(64, activation="elu")(out) # 64
     outputs = layers.Dense(1)(out)
 
     model = tf.keras.Model([state_input, action_inputs], outputs)
@@ -222,8 +227,8 @@ def get_state(state):
     # state, reward, done, info
     done = False
 
-    reward_stand = (1*(state[0])**2 + 0.1*state[1]**2 + (0.01*state[2]**2))
-    reward_compitition = (((1+state[3])+(state[4])) / (1 + abs(state[0])))
+    reward_stand = ((state[0])**2 + 0.1*state[1]**2 + (0.05*state[2]**2))
+    reward_compitition = (((1 + state[3] + state[4])) / (1 + abs(state[0])))
     reward = -(alpha*reward_stand + (1-alpha)*reward_compitition)
     # multi_motor = (4/(1+(state[3]+state[4]))) * (abs(state[0])/5)
     # reward = - reward_stand *  multi_motor
@@ -249,7 +254,10 @@ fps = 40
 sleep_time = (float)(1/fps)
 
 UPPER_BOUND = 3
-LOWER_BOUND = -3
+LOWER_BOUND = -UPPER_BOUND
+
+NOISE_UPPER_BOUND = UPPER_BOUND*0.3
+NOISE_LOWER_BOUND = -NOISE_UPPER_BOUND
 
 last_reward = 0
 alpha = 1.0
@@ -283,8 +291,9 @@ episode_time = 30
 gamma = 0.99
 # Used to update target networks
 tau = 0.005
+buffer_size = 64
 
-buffer = Buffer(80000, 64)
+buffer = Buffer(80000, buffer_size)
 
 ep_reward_list = []
 avg_reward_list = []
@@ -320,25 +329,23 @@ keep = False
 run = False
 
 def init(actor, critic, var_base_on, var_keep, var_run):
-    global ep, actor_model, critic_model, base_on, keep
+    global ep, actor_model, critic_model, base_on, keep, training
     base_on = var_base_on
     keep = var_keep
     var_run = var_run
+    training = not var_run
     if ( keep ):
         ep = int(len(os.listdir('./h5'))/2)-4
-        ep = 295
-        print('./h5/actor_model-%da'%ep)
-        # actor_model = tf.saved_model.load('./h5/actor_model-%d'%ep, tags='None')
-        actor_model = keras.models.load_model('h5/actor_model-%d'%ep, compile=False)
-        target_actor = actor_model
-        # critic_model = tf.saved_model.load('./h5/critic_model-%d'%ep)
-        critic_model = keras.models.load_model('h5/critic_model-%d'%ep, compile=False)
-        target_critic = critic_model
+        # ep = 25
+        folder = './h5/'
+        print(folder + 'actor_model-%da'%ep)
+        actor_model = keras.models.load_model(folder + 'actor_model-%d'%ep, compile=False)
+        target_actor.set_weights(actor_model.get_weights())
+        critic_model = keras.models.load_model(folder + 'critic_model-%d'%ep, compile=False)
+        target_critic.set_weights(critic_model.get_weights())
     elif ( base_on ):
         actor_model = tf.keras.models.load_model(actor, compile=False)
-        target_actor = actor_model
-        critic_model = tf.keras.models.load_model(critic, compile=False)
-        target_critic = critic_model
+        target_actor.set_weights(actor_model.get_weights())
     elif (var_run):
         actor_model = tf.keras.models.load_model(actor, compile=False)
         critic_model = tf.keras.models.load_model(critic, compile=False)
@@ -346,7 +353,7 @@ def init(actor, critic, var_base_on, var_keep, var_run):
 
     global buffer, ep_reward_list, avg_reward_list, time_list, ep_list, state_list, action_list, episodic_reward
     episodic_reward = 0
-    buffer = Buffer(80000, 64)
+    buffer = Buffer(80000, buffer_size)
     if (keep or base_on):
         buffer.load()
     ep_reward_list = []
@@ -367,10 +374,11 @@ def episode_start():
     global prev_state, reward, done
     prev_state, reward, done = get_state((0,0,0,0,0))
     state_list = []
-    global tt, ep, alpha
+    global tt, ep, alpha, action
     tt = time.time()
     ep+=1
-    alpha = alpha_max+(alpha_min-alpha_max)*float(min(1.0, (ep/600.0)))
+    alpha = alpha_max+(alpha_min-alpha_max)*float(min(1.0, (ep/850.0)))
+    action = 0
 
 
 ep = 0
@@ -457,9 +465,11 @@ def save():
                     index=False, encoding="utf-8")
     except Exception as e:
         # print(len(action_list))
+        print('save error')
         print(len(columns[0]))
         print(e)
         return
     buffer.save()
     state_list = []
     action_list = []
+    print('save done')

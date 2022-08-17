@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+import serial
+import time
+if __name__ == '__main__':
+    tt = time.time()
+    ser = serial.Serial('/dev/ttyACM0', 9600, timeout=1)
+    ser.reset_input_buffer()
+    # t = 0
+    while True:
+        # if(time.time() - tt > 1):
+        #     print(t)
+        #     tt = time.time()
+        #     t = 0
+        if ser.in_waiting > 0:
+            line = ser.readline().decode('utf-8').rstrip()
+            print(line)

@@ -1,0 +1,47 @@
+from gyro import Gyro
+import math
+import time
+import cv2
+import numpy as np
+
+g = Gyro()
+t = 0
+
+kalman = cv2.KalmanFilter(2,2)
+
+kalman.measurementMatrix = np.array([[1,0],[0,1]], np.float32)
+kalman.transitionMatrix = np.array([[1,0],[0,1]], np.float32)
+# ==============================================================================================
+# processNoiseCov 預測噪音
+# 越大越不穩定且越容易接近系統預測值，單步變化大
+# 噪音越小則預測結果與上個計算差不多
+kalman.processNoiseCov = np.array([[1,0],[0,1]], np.float32) * 0.001
+# ==============================================================================================
+# measurementNoiseCov 量測斜方差矩陣
+# 方差越小預測結果越接近測量值
+kalman.measurementNoiseCov = np.array([[1,0],[0,1]], np.float32) * 0.008
+kalman.statePre = np.array([[6],[6]], np.float32)
+
+st = time.time()
+
+try:
+    while True:
+        x,y,z = g()
+        if math.isnan(z):
+            print('='*30)
+            print(x,y,z)
+        x = kalman.correct(np.array([[y], [y]], np.float32))
+        y = kalman.predict()
+        x = x[0][0]
+        t+=1
+        dt = time.time() - st
+#        if (dt >= 0.08):
+#            print('x=', x)
+ #           x,y,z = g()
+  #          if(abs(x)>15):
+   #             #break
+                pass
+            t = 0
+            st = time.time()
+except KeyboardInterrupt:
+    pass

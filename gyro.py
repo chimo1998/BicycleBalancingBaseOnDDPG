@@ -119,7 +119,7 @@ class GY80(object):
             #Complementary Filter
             #Combine (noisy) orientation from acc/mag, 2%
             #with (drifting) orientation from gyro, 98%
-            alpha = 0.04
+            alpha = 0.02
             mao = self.current_orientation_euler_angles_mag_acc_only()
             if abs(mao[2]) > 30:
                 alpah = 0.01

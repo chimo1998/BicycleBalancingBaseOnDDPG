@@ -10,9 +10,9 @@ class Motor:
     gpio_front = 27
     gpio_rear = 17
 
-    def __init__(self, fr):
+    def __init__(self, fr, da_max):
         self.start = False
-
+        self.da_max = da_max
         self.speed = 0
         self.max_width = 1950
         self.min_width = 1050
@@ -43,8 +43,8 @@ class Motor:
         print('==================================')
 
 
-    def stop(self):
-        self.speed = self.speed * 0.25
+    def stop(self, da=0.25):
+        self.speed = self.speed * self.da_max
         self.pwm.ChangeDutyCycle(self.get_duty(self.speed))
         return self.speed
         #self.start = False
@@ -52,7 +52,9 @@ class Motor:
     def get_duty(self, v):
         v = min(4, v)
         width = self.min_width + (self.max_width-self.min_width)*(v/5)
-        return 100*(width/(1000000/__class__.freq))
+        d = 100*(width/(1000000/__class__.freq))
+        # print(d)
+        return d
 
     def set_speed(self, v):
         self.speed = v

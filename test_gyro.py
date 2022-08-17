@@ -35,8 +35,10 @@ try:
         x = x[0][0]
         t+=1
         dt = time.time() - st
-        if (dt >= 0.1):
-            print('x=', x)
+        if (dt >= 0.08):
+            # print('x=', x)
+            print(x)
+            x,y,z = g()
             if(abs(x)>15):
                 #break
                 pass
